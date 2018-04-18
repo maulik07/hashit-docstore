@@ -13,6 +13,7 @@ class App {
         this.initPassportGoogleDriveStrategy()
         this.initPassportGooglePlusStrategy()
         this.express = express()
+        this.express.use(passport.initialize())
         this.mountRoutes()
     }
 
@@ -28,15 +29,24 @@ class App {
         passport.use(new GooglePlusStrategy({
             clientID: process.env.CLIENT_ID,
             clientSecret: process.env.CLIENT_SECRET,
-            callbackURL: "http://localhost:3000/auth/google/callback",
-            passReqToCallback: true
+            callbackURL: "http://localhost:3000/auth/google/callback",            
+            accessType: 'offline',
+            prompt: 'consent',
+            successRedirect: '/success',
+            failureRedirect: '/fail'
         },
-            function (accessToken, refreshToken, profile, done) {
-                // asynchronous verification, for effect...
-                process.nextTick(function () {
-                    return done(null, profile);
-                });
-            }))
+        function(accessToken, refreshToken, profile, done) {
+          process.nextTick(function() {
+              console.log("Token is ");
+              console.log(util.inspect(accessToken, false, null));
+  
+              console.log("Refresh is ");
+              console.log(util.inspect(refreshToken, false, null));
+              console.log("Profile is ");
+              console.log(util.inspect(profile, false, null, true));
+              done(null, profile);
+          });
+        }))
     }
 
     private initPassportGoogleDriveStrategy() {
@@ -80,7 +90,7 @@ class App {
                 message: 'Fail'
             })
         })
-        router.get('/', (req, res) => {
+        router.get('/success', (req, res) => {            
             res.json({
                 message: 'Success'
             })
@@ -101,7 +111,7 @@ class App {
             }));
 
         router.get('/auth/google-drive',
-            passport.authenticate('google-drive', { scope: 'https://www.googleapis.com/auth/drive' }),
+            passport.authenticate('google-drive', {scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/drive.photos.readonly https://www.googleapis.com/auth/drive.readonly"}),
             function (req, res) {
                 // The request will be redirected to Google for authentication, so this
                 // function will not be called.
