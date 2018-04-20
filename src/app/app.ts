@@ -4,17 +4,33 @@ import * as util from 'util'
 import { Strategy as GoogleDriveStrategy } from 'passport-google-drive'
 import { Strategy as GooglePlusStrategy } from 'passport-google-oauth2'
 import * as dotenv from 'dotenv'
+import * as session from 'express-session'
+
+// Import controllers
+import { WelcomeController } from './controller/welcome.controller'
+import { GoogleDriveAuthController } from './controller/google-drive-auth.controller'
+import { GooglePlusAuthController } from './controller/google-plus-auth.controller'
 
 class App {
-    public express
+    public express : express.Application
+    
+    private routeMap : Map<any, express.Router[]> = new Map<any, express.Router[]>([
+        ['/', [WelcomeController, GoogleDriveAuthController, GooglePlusAuthController]]        
+    ])
 
     constructor() {
-        dotenv.config()
-        this.initPassportGoogleDriveStrategy()
-        this.initPassportGooglePlusStrategy()
+        dotenv.config()        
         this.express = express()
-        this.express.use(passport.initialize())
+        this.initPassportGoogleDriveStrategy()
+        this.initPassportGooglePlusStrategy()        
+        this.setupSession()
         this.mountRoutes()
+    }
+
+    private setupSession() {
+        this.express.use(session({secret:'mys3cr3TKey', resave: false, saveUninitialized: false}))
+        this.express.use(passport.initialize())        
+        this.express.use(passport.session())
     }
 
     private initPassportGooglePlusStrategy(): void {
@@ -29,24 +45,18 @@ class App {
         passport.use(new GooglePlusStrategy({
             clientID: process.env.CLIENT_ID,
             clientSecret: process.env.CLIENT_SECRET,
-            callbackURL: "http://localhost:3000/auth/google/callback",            
-            accessType: 'offline',
-            prompt: 'consent',
-            successRedirect: '/success',
-            failureRedirect: '/fail'
-        },
-        function(accessToken, refreshToken, profile, done) {
-          process.nextTick(function() {
-              console.log("Token is ");
-              console.log(util.inspect(accessToken, false, null));
-  
-              console.log("Refresh is ");
-              console.log(util.inspect(refreshToken, false, null));
-              console.log("Profile is ");
-              console.log(util.inspect(profile, false, null, true));
-              done(null, profile);
-          });
-        }))
+            callbackURL: "http://localhost:3000/auth/google/callback"
+        },(accessToken, refreshToken, profile, done) =>
+         this.googleVerifyCallback(accessToken, refreshToken, profile, done)
+        ))
+    }
+
+    private googleVerifyCallback(accessToken, refreshToken, profile, done) {
+        process.nextTick(function() {
+            console.log("Token is ");
+            console.log(util.inspect(accessToken, false, null, true));
+            done(null, {profile: profile, token: accessToken});
+        });
     }
 
     private initPassportGoogleDriveStrategy() {
@@ -63,70 +73,51 @@ class App {
             clientSecret: process.env.CLIENT_SECRET,
             callbackURL: "http://localhost:3000/auth/google-drive/callback"
         },
-            function (accessToken, refreshToken, profile, done) {
-                // asynchronous verification, for effect...
-                process.nextTick(function () {
+        (accessToken, refreshToken, profile, done) =>
+        this.googleVerifyCallback(accessToken, refreshToken, profile, done)
+       ))
+    }
 
-                    // To keep the example simple, the user's Google profile is returned to
-                    // represent the logged-in user.  In a typical application, you would want
-                    // to associate the Google account with a user record in your database,
-                    // and return that user instead.
-                    return done(null, profile);
-                });
-            }
-        ));
-
+    private checkAuthentication(req,res,next){
+        if(req.isAuthenticated()){
+            next();
+        } else{
+            res.redirect("/auth/google");
+        }
     }
 
     private mountRoutes(): void {
         const router = express.Router()
-        router.get('/', (req, res) => {
+
+        this.express.use('/secure*', this.checkAuthentication);
+        
+        this.routeMap.forEach((router: express.Router[], path: any) => {            
+            this.express.use(path, router);
+        })
+
+        router.get('/secure', (req, res) => {
             res.json({
-                message: 'Hello World!'
+                message: 'This is our secret'
             })
         })
-        router.get('/fail', (req, res) => {
+
+        router.get('/secure/another', (req, res) => {
             res.json({
-                message: 'Fail'
+                message: 'This is our secret'
             })
         })
+        
         router.get('/success', (req, res) => {            
             res.json({
-                message: 'Success'
+                message: `Success Yo! ${req.session.token}`
             })
         })
-
-        router.get('/auth/google',
-            passport.authenticate('google', {
-                scope:
-                    ['https://www.googleapis.com/auth/plus.login',
-                        'https://www.googleapis.com/auth/plus.profile.emails.read']
-            }
-            ));
-
-        router.get('/auth/google/callback',
-            passport.authenticate('google', {
-                successRedirect: '/success',
-                failureRedirect: '/fail'
-            }));
-
-        router.get('/auth/google-drive',
-            passport.authenticate('google-drive', {scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/drive.photos.readonly https://www.googleapis.com/auth/drive.readonly"}),
-            function (req, res) {
-                // The request will be redirected to Google for authentication, so this
-                // function will not be called.
-            });
 
         // GET /auth/google-drive/callback
         //   Use passport.authenticate() as route middleware to authenticate the
         //   request.  If authentication fails, the user will be redirected back to the
         //   login page.  Otherwise, the primary route function function will be called,
         //   which, in this example, will redirect the user to the home page.
-        router.get('/auth/google-drive/callback',
-            passport.authenticate('google-drive', { scope: 'https://www.googleapis.com/auth/drive', failureRedirect: '/fail' }),
-            function (req, res) {
-                res.redirect('/success');
-            });
         this.express.use('/', router)
     }
 }
